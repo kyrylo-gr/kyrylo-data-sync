@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(pip install *)",
+      "Bash(2>&1)",
+      "Bash(python -c *)",
+      "Bash(grep -E \"\\\\.py$\")"
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kdata"
+version = "0.1.0"
+description = "A tiny client for pushing and getting memo data by key."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "responses>=0.25",
+    "ruff>=0.5",
+]
+
+[tool.setuptools.packages.find]
+include = ["kdata*"]
+exclude = ["tests*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
