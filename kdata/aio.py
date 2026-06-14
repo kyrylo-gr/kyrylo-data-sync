@@ -85,9 +85,12 @@ async def push(
     token: Optional[str] = None,
     url: Optional[str] = None,
     *,
+    notify: bool = False,
     timeout: Optional[float] = _sync.REQUEST_TIMEOUT_SECONDS,
 ) -> Optional[object]:
-    return await asyncio.to_thread(_sync.push, key, value, token, url, timeout=timeout)
+    return await asyncio.to_thread(
+        _sync.push, key, value, token, url, notify=notify, timeout=timeout
+    )
 
 
 __all__ = [

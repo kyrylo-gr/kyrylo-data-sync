@@ -18,7 +18,7 @@ keyring = [
 ]
 dev = [
     "pytest>=8",
-    "responses>=0.25",
+    "responses==0.25",
     "ruff>=0.5",
 ]
 

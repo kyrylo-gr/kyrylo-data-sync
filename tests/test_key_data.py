@@ -81,6 +81,21 @@ def test_push_sends_expected_request_and_returns_json():
     assert TOKEN not in request.url
 
 
+@responses.activate
+def test_push_includes_notify_when_requested():
+    responses.add(
+        responses.POST,
+        f"{BASE_URL}/memo/example",
+        json={"ok": True},
+        status=200,
+    )
+
+    push("example", {"hello": "world"}, TOKEN, url=BASE_URL, notify=True)
+
+    payload = json.loads(responses.calls[0].request.body)
+    assert payload == {"value": {"hello": "world"}, "notify": True}
+
+
 @pytest.mark.parametrize(
     "value",
     [

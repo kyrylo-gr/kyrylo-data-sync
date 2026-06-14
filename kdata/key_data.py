@@ -435,16 +435,21 @@ def push(
     token: Optional[str] = None,
     url: Optional[str] = None,
     *,
+    notify: bool = False,
     timeout: Optional[float] = REQUEST_TIMEOUT_SECONDS,
 ) -> Optional[object]:
     _validate_key(key)
     resolved_token = _resolve_token(key, token)
     _validate_value(value)
 
+    payload: dict = {"value": value}
+    if notify:
+        payload["notify"] = True
+
     return _request_json(
         requests.post,
         _build_url(_base_url(url), key),
         headers=_build_auth_headers(resolved_token),
-        json={"value": value},
+        json=payload,
         timeout=timeout,
     )
