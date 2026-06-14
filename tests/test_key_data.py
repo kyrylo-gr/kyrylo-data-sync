@@ -18,13 +18,11 @@ from kdata import (
     delete_token,
     get,
     get_saved_tokens,
-    get_suppress_errors,
     get_token_storage,
     get_value,
     key_data,
     push,
     save_token,
-    set_suppress_errors,
     token_settings_path,
 )
 
@@ -34,16 +32,17 @@ BASE_URL = "https://mock.test"
 
 @pytest.fixture(autouse=True)
 def reset_suppress_errors():
-    set_suppress_errors(False)
+    original = config.SUPPRESS_ERRORS
+    config.SUPPRESS_ERRORS = False
     yield
-    set_suppress_errors(False)
+    config.SUPPRESS_ERRORS = original
 
 
 @responses.activate
 def test_get_sends_expected_request_and_returns_json():
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"value": {"hello": "world"}},
         status=200,
     )
@@ -53,7 +52,7 @@ def test_get_sends_expected_request_and_returns_json():
     assert result == {"value": {"hello": "world"}}
     request = responses.calls[0].request
     assert request.method == "GET"
-    assert request.url == f"{BASE_URL}/memo/example"
+    assert request.url == f"{BASE_URL}/memo/api/example"
     assert request.headers["Authorization"] == f"Bearer {TOKEN}"
     assert "test-token" not in request.url
     assert request.body is None
@@ -63,7 +62,7 @@ def test_get_sends_expected_request_and_returns_json():
 def test_push_sends_expected_request_and_returns_json():
     responses.add(
         responses.POST,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"ok": True},
         status=200,
     )
@@ -73,7 +72,7 @@ def test_push_sends_expected_request_and_returns_json():
     assert result == {"ok": True}
     request = responses.calls[0].request
     assert request.method == "POST"
-    assert request.url == f"{BASE_URL}/memo/example"
+    assert request.url == f"{BASE_URL}/memo/api/example"
     assert request.headers["Authorization"] == f"Bearer {TOKEN}"
     payload = json.loads(request.body)
     assert payload == {"value": {"hello": "world"}}
@@ -85,7 +84,7 @@ def test_push_sends_expected_request_and_returns_json():
 def test_push_includes_notify_when_requested():
     responses.add(
         responses.POST,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"ok": True},
         status=200,
     )
@@ -116,7 +115,7 @@ def test_push_accepts_value_at_1024_byte_limit():
     with responses.RequestsMock() as rsps:
         rsps.add(
             responses.POST,
-            f"{BASE_URL}/memo/example",
+            f"{BASE_URL}/memo/api/example",
             json={"ok": True},
             status=200,
         )
@@ -137,7 +136,7 @@ def test_push_rejects_non_json_serializable_dictionary():
 
 
 def test_suppress_errors_converts_validation_errors_to_warnings():
-    set_suppress_errors(True)
+    config.SUPPRESS_ERRORS = True
 
     with pytest.warns(RuntimeWarning, match="kdata ignored an error in push"):
         assert push("example", "json string", TOKEN, url=BASE_URL) is None
@@ -148,23 +147,23 @@ def test_suppress_errors_converts_missing_token_errors_to_warnings(
 ):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(key_data, "import_module", _raise_import_error)
-    set_suppress_errors(True)
+    config.SUPPRESS_ERRORS = True
 
     with pytest.warns(RuntimeWarning, match="KDATA_TOKEN_EXAMPLE"):
         assert get("example", url=BASE_URL) is None
 
 
 def test_suppress_errors_can_be_disabled():
-    set_suppress_errors(True)
-    assert get_suppress_errors() is True
-    set_suppress_errors(False)
+    config.SUPPRESS_ERRORS = True
+    assert config.SUPPRESS_ERRORS is True
+    config.SUPPRESS_ERRORS = False
 
     with pytest.raises(TypeError):
         push("example", "json string", TOKEN, url=BASE_URL)
 
 
 def test_suppress_errors_does_not_raise_when_warnings_are_errors():
-    set_suppress_errors(True)
+    config.SUPPRESS_ERRORS = True
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
@@ -195,23 +194,34 @@ def test_functions_validate_empty_url(func, args):
         func(*args, url="")
 
 
-@pytest.mark.parametrize("method,func,args", [
-    (responses.GET, get, ("example", TOKEN)),
-    (responses.POST, push, ("example", {}, TOKEN)),
-])
+@pytest.mark.parametrize(
+    "method,func,args",
+    [
+        (responses.GET, get, ("example", TOKEN)),
+        (responses.POST, push, ("example", {}, TOKEN)),
+    ],
+)
 def test_functions_warn_for_http_error_responses(method, func, args):
+    config.SUPPRESS_ERRORS = True
     with responses.RequestsMock() as rsps:
-        rsps.add(method, f"{BASE_URL}/memo/example", json={"error": "no"}, status=500)
+        rsps.add(
+            method, f"{BASE_URL}/memo/api/example", json={"error": "no"}, status=500
+        )
 
         with pytest.warns(RuntimeWarning, match="HTTP 500"):
             assert func(*args, url=BASE_URL) is None
 
 
-@pytest.mark.parametrize("request_name,func,args", [
-    ("get", get, ("example", TOKEN)),
-    ("post", push, ("example", {}, TOKEN)),
-])
+@pytest.mark.parametrize(
+    "request_name,func,args",
+    [
+        ("get", get, ("example", TOKEN)),
+        ("post", push, ("example", {}, TOKEN)),
+    ],
+)
 def test_functions_warn_for_connection_failures(monkeypatch, request_name, func, args):
+    config.SUPPRESS_ERRORS = True
+
     def fail_request(*_args, **_kwargs):
         raise requests.ConnectionError("network down")
 
@@ -221,26 +231,32 @@ def test_functions_warn_for_connection_failures(monkeypatch, request_name, func,
         assert func(*args, url=BASE_URL) is None
 
 
-@pytest.mark.parametrize("method,func,args", [
-    (responses.GET, get, ("example", TOKEN)),
-    (responses.POST, push, ("example", {}, TOKEN)),
-])
+@pytest.mark.parametrize(
+    "method,func,args",
+    [
+        (responses.GET, get, ("example", TOKEN)),
+        (responses.POST, push, ("example", {}, TOKEN)),
+    ],
+)
 def test_functions_use_configured_base_url(monkeypatch, method, func, args):
     monkeypatch.setattr(config, "BASE_URL", BASE_URL)
 
     with responses.RequestsMock() as rsps:
-        rsps.add(method, f"{BASE_URL}/memo/example", json={"ok": True}, status=200)
+        rsps.add(method, f"{BASE_URL}/memo/api/example", json={"ok": True}, status=200)
 
         assert func(*args) == {"ok": True}
 
 
-@pytest.mark.parametrize("method,func,args", [
-    (responses.GET, get, ("example", TOKEN)),
-    (responses.POST, push, ("example", {}, TOKEN)),
-])
+@pytest.mark.parametrize(
+    "method,func,args",
+    [
+        (responses.GET, get, ("example", TOKEN)),
+        (responses.POST, push, ("example", {}, TOKEN)),
+    ],
+)
 def test_functions_use_override_url_with_trailing_slash(method, func, args):
     with responses.RequestsMock() as rsps:
-        rsps.add(method, f"{BASE_URL}/memo/example", json={"ok": True}, status=200)
+        rsps.add(method, f"{BASE_URL}/memo/api/example", json={"ok": True}, status=200)
 
         assert func(*args, url=f"{BASE_URL}/") == {"ok": True}
 
@@ -252,7 +268,7 @@ def test_get_uses_keyed_environment_token(monkeypatch, tmp_path):
     monkeypatch.setenv("KDATA_TOKEN", "global-token")
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example-key",
+        f"{BASE_URL}/memo/api/example-key",
         json={"ok": True},
         status=200,
     )
@@ -270,7 +286,7 @@ def test_get_does_not_use_global_environment_token(monkeypatch, tmp_path):
     monkeypatch.setattr(key_data, "import_module", _raise_import_error)
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"ok": True},
         status=200,
     )
@@ -287,7 +303,7 @@ def test_get_uses_project_settings_file_token(monkeypatch, tmp_path):
     save_token("example", "file-token")
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"ok": True},
         status=200,
     )
@@ -305,7 +321,7 @@ def test_get_uses_keyring_token_after_file_miss(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "keyring", fake_keyring)
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"ok": True},
         status=200,
     )
@@ -323,7 +339,7 @@ def test_explicit_token_takes_precedence(monkeypatch, tmp_path):
     save_token("example", "file-token")
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"ok": True},
         status=200,
     )
@@ -489,7 +505,7 @@ def test_get_value_returns_response_value(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"value": {"hello": "world"}},
         status=200,
     )
@@ -499,9 +515,10 @@ def test_get_value_returns_response_value(monkeypatch, tmp_path):
 
 @responses.activate
 def test_get_value_returns_none_when_get_is_ignored():
+    config.SUPPRESS_ERRORS = True
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"error": "no"},
         status=503,
     )
@@ -530,19 +547,19 @@ def test_async_get_and_push_are_awaitable():
     async_kdata = importlib.import_module("kdata.aio")
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"value": {"hello": "world"}},
         status=200,
     )
     responses.add(
         responses.GET,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"value": {"hello": "world"}},
         status=200,
     )
     responses.add(
         responses.POST,
-        f"{BASE_URL}/memo/example",
+        f"{BASE_URL}/memo/api/example",
         json={"ok": True},
         status=200,
     )
@@ -565,12 +582,13 @@ def test_async_suppress_errors_converts_errors_to_warnings():
     async_kdata = importlib.import_module("kdata.aio")
 
     async def run():
-        async_kdata.set_suppress_errors(True)
-        assert async_kdata.get_suppress_errors() is True
+        config.SUPPRESS_ERRORS = True
+        assert config.SUPPRESS_ERRORS is True
         with pytest.warns(RuntimeWarning, match="kdata ignored an error in push"):
-            assert await async_kdata.push(
-                "example", "json string", TOKEN, url=BASE_URL
-            ) is None
+            assert (
+                await async_kdata.push("example", "json string", TOKEN, url=BASE_URL)
+                is None
+            )
 
     asyncio.run(run())
 

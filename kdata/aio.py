@@ -1,8 +1,9 @@
 import asyncio
 from functools import wraps
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
+from . import config
 from . import key_data as _sync
 
 KeyringUnavailableError = _sync.KeyringUnavailableError
@@ -15,7 +16,7 @@ def _warn_on_error(func):
         try:
             return await func(*args, **kwargs)
         except Exception as exc:
-            if not _sync.get_suppress_errors():
+            if not config.SUPPRESS_ERRORS:
                 raise
             _sync._warn_ignored(f"kdata ignored an error in {func.__name__}: {exc}")
             return None
@@ -23,21 +24,34 @@ def _warn_on_error(func):
     return wrapper
 
 
-def set_suppress_errors(enabled: bool = True) -> None:
-    _sync.set_suppress_errors(enabled)
-
-
-def get_suppress_errors() -> bool:
-    return _sync.get_suppress_errors()
+@_warn_on_error
+async def copy_token(
+    src_key: str,
+    dst_key: str,
+    *,
+    src_storage: Optional[Literal["file", "keyring", "both"]] = None,
+    dst_storage: Optional[Literal["file", "keyring", "both"]] = None,
+) -> None:
+    await asyncio.to_thread(
+        _sync.copy_token,
+        src_key,
+        dst_key,
+        src_storage=src_storage,
+        dst_storage=dst_storage,
+    )
 
 
 @_warn_on_error
-async def save_token(key: str, token: str, *, storage: str = "file") -> None:
+async def save_token(
+    key: str, token: str, *, storage: Literal["file", "keyring", "both"] = "file"
+) -> None:
     await asyncio.to_thread(_sync.save_token, key, token, storage=storage)
 
 
 @_warn_on_error
-async def delete_token(key: str, *, storage: str = "file") -> None:
+async def delete_token(
+    key: str, *, storage: Literal["file", "keyring", "both"] = "file"
+) -> None:
     await asyncio.to_thread(_sync.delete_token, key, storage=storage)
 
 
@@ -96,14 +110,13 @@ async def push(
 __all__ = [
     "KeyringUnavailableError",
     "TokenNotFoundError",
+    "copy_token",
     "delete_token",
     "get",
     "get_saved_tokens",
-    "get_suppress_errors",
     "get_token_storage",
     "get_value",
     "push",
     "save_token",
-    "set_suppress_errors",
     "token_settings_path",
 ]
