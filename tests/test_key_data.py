@@ -135,6 +135,152 @@ def test_push_rejects_non_json_serializable_dictionary():
         push("example", {"bad": object()}, TOKEN, url=BASE_URL)
 
 
+PNG_1X1 = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01"
+    b"\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+JPEG_HEADER = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
+GIF_HEADER = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x00\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+WEBP_HEADER = b"RIFF\x18\x00\x00\x00WEBPVP8 "
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_mime"),
+    [
+        (PNG_1X1, "image/png"),
+        (JPEG_HEADER, "image/jpeg"),
+        (GIF_HEADER, "image/gif"),
+        (WEBP_HEADER, "image/webp"),
+    ],
+)
+def test_detect_mime_type_recognises_supported_formats(data, expected_mime):
+    assert key_data._detect_mime_type(data) == expected_mime
+
+
+def test_detect_mime_type_rejects_unknown_bytes():
+    with pytest.raises(ValueError, match="unsupported or unrecognised image format"):
+        key_data._detect_mime_type(b"not-an-image")
+
+
+def test_to_image_data_uri_from_bytes():
+    data_uri = key_data._to_image_data_uri(PNG_1X1)
+
+    assert data_uri.startswith("data:image/png;base64,")
+
+
+def test_to_image_data_uri_from_path(tmp_path):
+    image_path = tmp_path / "chart.png"
+    image_path.write_bytes(PNG_1X1)
+
+    data_uri = key_data._to_image_data_uri(image_path)
+
+    assert data_uri.startswith("data:image/png;base64,")
+
+
+def test_to_image_data_uri_from_figure_like_object():
+    class FakeFigure:
+        def savefig(self, buf, *, format="png"):
+            buf.write(PNG_1X1)
+
+    data_uri = key_data._to_image_data_uri(FakeFigure())
+
+    assert data_uri.startswith("data:image/png;base64,")
+
+
+@responses.activate
+def test_push_with_image_bytes_sends_data_uri():
+    responses.add(
+        responses.POST,
+        f"{BASE_URL}/memo/api/example",
+        json={"ok": True},
+        status=200,
+    )
+
+    result = push("example", {}, TOKEN, url=BASE_URL, image=PNG_1X1)
+
+    assert result == {"ok": True}
+    payload = json.loads(responses.calls[0].request.body)
+    assert payload["value"]["image"].startswith("data:image/png;base64,")
+
+
+@responses.activate
+def test_push_with_image_path_sends_data_uri(tmp_path):
+    image_path = tmp_path / "chart.png"
+    image_path.write_bytes(PNG_1X1)
+    responses.add(
+        responses.POST,
+        f"{BASE_URL}/memo/api/example",
+        json={"ok": True},
+        status=200,
+    )
+
+    push("example", {}, TOKEN, url=BASE_URL, image=image_path)
+
+    payload = json.loads(responses.calls[0].request.body)
+    assert payload["value"]["image"].startswith("data:image/png;base64,")
+
+
+@responses.activate
+def test_push_with_image_merges_extra_value_fields():
+    responses.add(
+        responses.POST,
+        f"{BASE_URL}/memo/api/example",
+        json={"ok": True},
+        status=200,
+    )
+
+    push(
+        "example", {"caption": "Living room sensor"}, TOKEN, url=BASE_URL, image=PNG_1X1
+    )
+
+    payload = json.loads(responses.calls[0].request.body)
+    assert payload["value"]["caption"] == "Living room sensor"
+    assert payload["value"]["image"].startswith("data:image/png;base64,")
+
+
+def test_push_rejects_value_with_image_when_image_kwarg_is_passed():
+    with pytest.raises(ValueError, match='value already contains "image"'):
+        push("example", {"image": "existing"}, TOKEN, url=BASE_URL, image=PNG_1X1)
+
+
+def test_push_with_image_skips_1024_byte_value_limit():
+    value = {"data": "x" * 1014}
+
+    with responses.RequestsMock() as rsps:
+        rsps.add(
+            responses.POST,
+            f"{BASE_URL}/memo/api/example",
+            json={"ok": True},
+            status=200,
+        )
+
+        assert push("example", value, TOKEN, url=BASE_URL, image=PNG_1X1) == {
+            "ok": True
+        }
+
+
+@responses.activate
+def test_push_with_matplotlib_figure():
+    plt = pytest.importorskip("matplotlib.pyplot")
+    figure = plt.figure()
+    try:
+        responses.add(
+            responses.POST,
+            f"{BASE_URL}/memo/api/example",
+            json={"ok": True},
+            status=200,
+        )
+
+        push("example", {}, TOKEN, url=BASE_URL, image=figure)
+
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["value"]["image"].startswith("data:image/png;base64,")
+    finally:
+        plt.close(figure)
+
+
 def test_suppress_errors_converts_validation_errors_to_warnings():
     config.SUPPRESS_ERRORS = True
 

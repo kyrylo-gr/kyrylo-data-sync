@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 import os
 import re
@@ -7,7 +9,7 @@ from contextlib import suppress
 from functools import wraps
 from importlib import import_module
 from pathlib import Path
-from typing import Literal, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 import requests
 
@@ -19,6 +21,13 @@ SETTINGS_FILENAME = ".kdata.json"
 SETTINGS_VERSION = 1
 KEYRING_SERVICE = "kdata"
 VALID_STORAGE = {"file", "keyring", "both"}
+IMAGE_EXTENSION_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
 
 
 class TokenNotFoundError(ValueError):
@@ -312,6 +321,48 @@ def _resolve_token(key: str, token: Optional[str]) -> str:
     )
 
 
+def _detect_mime_type(data: bytes) -> str:
+    if data.startswith(b"\x89PNG"):
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:3] == b"GIF":
+        return "image/gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    raise ValueError("unsupported or unrecognised image format")
+
+
+def _figure_to_bytes(figure: Any) -> bytes:
+    buffer = io.BytesIO()
+    figure.savefig(buffer, format="png")
+    return buffer.getvalue()
+
+
+def _to_image_data_uri(image: object) -> str:
+    savefig = getattr(image, "savefig", None)
+    if callable(savefig):
+        data = _figure_to_bytes(image)
+        mime = "image/png"
+    elif isinstance(image, bytes):
+        data = image
+        mime = _detect_mime_type(data)
+    elif isinstance(image, (str, Path)):
+        path = Path(image)
+        data = path.read_bytes()
+        mime = IMAGE_EXTENSION_MIME.get(path.suffix.lower())
+        if mime is None:
+            mime = _detect_mime_type(data)
+    else:
+        raise TypeError(
+            "image must be bytes, a path, or an object with savefig(), "
+            f"got {type(image).__name__}"
+        )
+
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
 def _validate_value(value: dict) -> None:
     if not isinstance(value, dict):
         raise TypeError(f"push value must be a dictionary, got {type(value).__name__}")
@@ -500,16 +551,30 @@ def copy_token(
 @_warn_on_error
 def push(
     key: str,
-    value: dict,
+    value: Optional[dict] = None,
     token: Optional[str] = None,
     url: Optional[str] = None,
     *,
+    image=None,
     notify: bool = False,
     timeout: Optional[float] = REQUEST_TIMEOUT_SECONDS,
 ) -> Optional[object]:
     _validate_key(key)
     resolved_token = _resolve_token(key, token)
-    _validate_value(value)
+    value = value or {}
+
+    if image is not None:
+        if not isinstance(value, dict):
+            raise TypeError(
+                f"push value must be a dictionary, got {type(value).__name__}"
+            )
+        if "image" in value:
+            raise ValueError(
+                'value already contains "image"; pass image via image= kwarg only'
+            )
+        value = {**value, "image": _to_image_data_uri(image)}
+    else:
+        _validate_value(value)
 
     payload: dict = {"value": value}
     if notify:

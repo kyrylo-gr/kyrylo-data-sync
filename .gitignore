@@ -189,3 +189,5 @@ trash.*
 trash_*.*
 
 .vscode
+
+testing.ipynb
